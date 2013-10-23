@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_layout_file>
+	<ActiveTarget name="Debug" />
+	<File name="client_mem.cpp" open="1" top="1" tabpos="1">
+		<Cursor position="6120" topLine="218" />
+	</File>
+	<File name="globals.cpp" open="0" top="0" tabpos="3">
+		<Cursor position="160" topLine="0" />
+	</File>
+	<File name="globals.h" open="0" top="0" tabpos="4">
+		<Cursor position="534" topLine="0" />
+	</File>
+	<File name="kinectDepthCompression-client.cpp" open="1" top="0" tabpos="3">
+		<Cursor position="982" topLine="9" />
+	</File>
+	<File name="kinectDepthCompression-client.h" open="1" top="0" tabpos="2">
+		<Cursor position="115" topLine="0" />
+	</File>
+	<File name="osc_handlers.cpp" open="0" top="0" tabpos="2">
+		<Cursor position="602" topLine="15" />
+	</File>
+	<File name="osc_handlers.h" open="0" top="0" tabpos="0">
+		<Cursor position="495" topLine="0" />
+	</File>
+	<File name="process_jpeg.cpp" open="0" top="0" tabpos="2">
+		<Cursor position="6099" topLine="0" />
+	</File>
+</CodeBlocks_layout_file>
