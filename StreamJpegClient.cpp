@@ -35,20 +35,14 @@
 using namespace std;
 
 
-// *****************************************************************************
-// READ ME!!!!!
+// Global variables
+// Any changes made here should be reflected in globals.h
 
-//global vars - make sure if you edit anything here you edit the globals.h file!
-//and if need be, the globals.cpp file
-//IplImage* img = NULL;
-//IplImage *depthImage = NULL;
+char* ServerIP;
 cv::Mat RawRGBFrame; 
 int IsDataReady = 0;
 int sock;
-char* ServerIP;
 int ServerPort;
-//int stream_clientWidth = 640;
-//int stream_clientHeight = 480;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 struct sigaction SignalActionManager;
 
@@ -108,16 +102,19 @@ int main(int argc, char **argv)
 
         if (IsDataReady) 
 		{
-            //cvShowImage("stream_client", RawRGBFrame);
-			//cv::Mat RGBFrameMat = cv::Mat(RawRGBFrame, true);
-			printf("Caught image, trying to display...\n");
+            // Display image, clear data and wait for the next one
 			imshow("stream_client", RawRGBFrame);
-            	
-			RawRGBFrame.release();
-
-            IsDataReady = 0;
+            RawRGBFrame.release();
+			IsDataReady = 0;
         }
         pthread_mutex_unlock(&mutex);
+
+		// Wait for esc key. Note we *must* have the cvWaitKey here for the cvNamedWindow to show up.
+		key = cvWaitKey(27);
+		if(key == 27)
+		{
+			break;
+		}
     }
 
     printf("Exit");
