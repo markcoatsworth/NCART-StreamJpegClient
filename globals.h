@@ -11,17 +11,15 @@
 #define DIV 1
 
 extern std::stringstream stringstrm; //(stringstream::in | stringstream::out);
+extern cv::Mat RawRGBFrame; 
 extern int sock;
 extern pthread_mutex_t mutex;
-extern char* server_ip;
-extern int server_port;
-extern int width;
-extern int height;
-extern int is_data_ready;
+extern char* ServerIp;
+extern int ServerPort;
+extern int IsDataReady;
 extern int fileLength;
 extern char charFileLength[10];
 extern CvCapture* capture;
-extern IplImage *img;
 
 extern int done;
 
