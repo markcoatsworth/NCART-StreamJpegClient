@@ -85,14 +85,8 @@ int main(int argc, char **argv)
         quit("pthread_create failed.", 1);
     }
 	
-	//printf("Creating namedWindow\n");
+	// Setup the video display window
     cv::namedWindow("stream_client");//, CV_WINDOW_AUTOSIZE);
-	//printf("NamedWindow created...\n");
-
-    //char charFileLength[10];
-
-    // an address to send messages to. sometimes it is better to let the server
-    //lo_address t = lo_address_new(NULL, "7770");
 
 	// Begin the main client loop which checks for available data, then displays it as a video stream
     while(1) 
@@ -103,7 +97,14 @@ int main(int argc, char **argv)
         if (IsDataReady) 
 		{
             // Display image, clear data and wait for the next one
-			imshow("stream_client", RawRGBFrame);
+			try
+			{
+				imshow("stream_client", RawRGBFrame);
+			}
+			catch(cv::Exception E)
+			{
+				printf("Invalid JPEG file, skipping.");
+			}
             RawRGBFrame.release();
 			IsDataReady = 0;
         }
@@ -213,7 +214,7 @@ void* streamClient(void* arg)
         // Write the raw jpeg data to the stringstream
 		stringstrm.write(sockdata, fileLength);
 		
-
+		
         // Uncompress jpeg data to an IplImage, then to a Mat
 		IplImage *IplJpegImageStream = NULL;
         IplJpegImageStream = readJpeg(stringstrm);
@@ -221,15 +222,16 @@ void* streamClient(void* arg)
 
         //free the socket data
         free(sockdata);
-
+		cvReleaseImage(&IplJpegImageStream);
+        		
 
         pthread_mutex_lock(&mutex);
 
         //clear the stringstream
         stringstrm.str("");
         IsDataReady = 1;
-
-        //the frame came in well, unlock the thread and proceed to get the next frame.
+		
+		//the frame came in well, unlock the thread and proceed to get the next frame.
         pthread_mutex_unlock(&mutex);
 
         // have we terminated yet?
