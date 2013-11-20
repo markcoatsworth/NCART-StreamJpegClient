@@ -43,6 +43,7 @@ cv::Mat RawRGBFrame;
 int IsDataReady = 0;
 int sock;
 int ServerPort;
+IplImage *IplJpegImageStream;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 struct sigaction SignalActionManager;
 
@@ -72,7 +73,7 @@ int main(int argc, char **argv)
 	// Verify command line arguments
     if (argc != 3) 
 	{
-        quit("Usage: StreamJpegClient <ServerIP> <ServerPort>", 0);
+        quit("Usage: ./StreamJpegClient <ServerIP> <ServerPort>", 0);
     }
 
     // Get the server/port parameters
@@ -106,6 +107,7 @@ int main(int argc, char **argv)
 				printf("Invalid JPEG file, skipping.");
 			}
             RawRGBFrame.release();
+			cvReleaseImage(&IplJpegImageStream);
 			IsDataReady = 0;
         }
         pthread_mutex_unlock(&mutex);
@@ -216,13 +218,10 @@ void* streamClient(void* arg)
 		
 		
         // Uncompress jpeg data to an IplImage, then to a Mat
-		IplImage *IplJpegImageStream = NULL;
-        IplJpegImageStream = readJpeg(stringstrm);
+		IplJpegImageStream = readJpeg(stringstrm);
+		//printf("Before thread lock: IplJpegImageStream=%d\n", &IplJpegImageStream);		
 		RawRGBFrame = cv::Mat(IplJpegImageStream);
 
-        //free the socket data
-        free(sockdata);
-		cvReleaseImage(&IplJpegImageStream);
         		
 
         pthread_mutex_lock(&mutex);
@@ -230,7 +229,12 @@ void* streamClient(void* arg)
         //clear the stringstream
         stringstrm.str("");
         IsDataReady = 1;
-		
+		//free the socket data
+        free(sockdata);
+		//printf("After thread lock: IplJpegImageStream=%d\n", &IplJpegImageStream);	
+		//cvReleaseImage(&IplJpegImageStream);
+		//RawRGBFrame.release();
+        
 		//the frame came in well, unlock the thread and proceed to get the next frame.
         pthread_mutex_unlock(&mutex);
 

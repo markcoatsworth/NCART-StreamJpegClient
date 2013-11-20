@@ -17,7 +17,6 @@
 //OpenCV2.2 includes
 #include <opencv/cv.h>
 #include <opencv/highgui.h>
-#include "libfreenect_cv.h"
 
 //Jpeg Lib includes
 #include <jpeglib.h>
