@@ -10,7 +10,8 @@
 
 #define DIV 1
 
-extern std::stringstream stringstrm; //(stringstream::in | stringstream::out);
+extern std::stringstream DepthStringStream;
+extern std::stringstream ImageStringStream; //(stringstream::in | stringstream::out);
 extern cv::Mat RawRGBFrame; 
 extern int sock;
 extern pthread_mutex_t mutex;

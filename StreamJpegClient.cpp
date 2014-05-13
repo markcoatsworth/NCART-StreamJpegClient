@@ -47,8 +47,13 @@ IplImage *IplJpegImageStream;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 struct sigaction SignalActionManager;
 
-char charFileLength[10];
-int fileLength;
+std::stringstream DepthStringStream;
+std::stringstream ImageStringStream;
+
+char DepthFileLengthString[10];
+char ImageFileLengthString[10];
+int DepthFileLength;
+int ImageFileLength;
 
 void SignalHandler(int sigNum);
 void* streamClient(void* arg);
@@ -89,6 +94,9 @@ int main(int argc, char **argv)
 	// Setup the video display window
     cv::namedWindow("stream_client");//, CV_WINDOW_AUTOSIZE);
 
+	// Debug: set up the depth data output file
+	std::ofstream DepthFile;
+
 	// Begin the main client loop which checks for available data, then displays it as a video stream
     while(1) 
 	{
@@ -97,7 +105,7 @@ int main(int argc, char **argv)
 
         if (IsDataReady) 
 		{
-            // Display image, clear data and wait for the next one
+            // Display image, clear data
 			try
 			{
 				imshow("stream_client", RawRGBFrame);
@@ -108,6 +116,20 @@ int main(int argc, char **argv)
 			}
             RawRGBFrame.release();
 			cvReleaseImage(&IplJpegImageStream);
+
+			// Display depth
+			//cout << "Writing " << DepthStringStream.tellg() << " bytes of depth data to file." << endl;
+			DepthFile.open("depth.data", std::ofstream::out | std::ofstream::app);			
+			DepthFile << DepthStringStream.rdbuf();
+			DepthFile << endl << endl << endl << "testline" << endl << endl << endl;
+			DepthFile.close();
+
+			// Clear depth string stream			
+			//cout << "Clearing DepthStringStream..." << endl;
+	        DepthStringStream.str("");
+        
+
+			// Now wait for the next data
 			IsDataReady = 0;
         }
         pthread_mutex_unlock(&mutex);
@@ -178,7 +200,7 @@ void* streamClient(void* arg)
 
     printf("Rec'v stream\n");
 
-    //connect to server
+    // Connect to server
     if (connect(sock, (struct sockaddr*)&server, sizeof(server)) < 0) 
 	{
         quit("connect() failed.", 1);
@@ -190,22 +212,23 @@ void* streamClient(void* arg)
 
     char *sockdata;
     char lengthBuff[4];
-    int fileLength;
     int i, j, k, bytes;
 
-    /* start receiving images */
+    // Start receiving images + depth data
     while(1) 
 	{
 
-        //get how many bytes in the next frame
-        bytes = recv(sock, charFileLength, 10, 0);
-        fileLength =  atoi(charFileLength);
-        sockdata = ( char *) malloc(fileLength);
+        // Read number of bytes of image data
+        bytes = recv(sock, ImageFileLengthString, 10, 0);
+        ImageFileLength =  atoi(ImageFileLengthString);
+        sockdata = ( char *) malloc(ImageFileLength);
 
-        // get raw data from the frame
-        for (i = 0; i < fileLength; i += bytes) 
+		cout << "ImageFileLength=" << ImageFileLength << endl;
+
+        // Read image data from the socket
+        for (i = 0; i < ImageFileLength; i += bytes) 
 		{
-            if ((bytes = recv(sock, sockdata + i, (fileLength)-i, 0)) == -1) 
+            if ((bytes = recv(sock, sockdata + i, (ImageFileLength)-i, 0)) == -1) 
 			{
 
                 printf("jpeg recv failed!! %d\n", i);
@@ -213,24 +236,43 @@ void* streamClient(void* arg)
             }
         }
 
-        // Write the raw jpeg data to the stringstream
-		stringstrm.write(sockdata, fileLength);
-		
-		
+        // Write the raw jpeg data to the stringstream.
+		ImageStringStream.write(sockdata, ImageFileLength);
+			
         // Uncompress jpeg data to an IplImage, then to a Mat
-		IplJpegImageStream = readJpeg(stringstrm);
-		//printf("Before thread lock: IplJpegImageStream=%d\n", &IplJpegImageStream);		
+		IplJpegImageStream = readJpeg(ImageStringStream);
 		RawRGBFrame = cv::Mat(IplJpegImageStream);
 
-        		
+		// Now we have to bring in depth data. Read number of bytes of depth data
+		bytes = recv(sock, DepthFileLengthString, 10, 0);
+        DepthFileLength =  atoi(DepthFileLengthString);		       
+		sockdata = ( char *) malloc(DepthFileLength);
+
+		cout << "DepthFileLength=" << DepthFileLength << endl;
+
+        // Read depth data from the socket
+        for (i = 0; i < DepthFileLength; i += bytes) 
+		{
+            if ((bytes = recv(sock, sockdata + i, (DepthFileLength)-i, 0)) == -1) 
+			{
+
+                printf("Depth data receive failed. %d\n", i);
+                quit("Depth data receive failed.", 1);
+            }
+        }
+
+ 		// Write the raw depth data to the stringstream.
+		DepthStringStream.write(sockdata, DepthFileLength);
+		//cout << "Captured " << DepthStringStream.tellg() << " bytes of depth data." << endl;
 
         pthread_mutex_lock(&mutex);
 
-        //clear the stringstream
-        stringstrm.str("");
+        // Clear the stringstream and free socket data
+		//cout << "Clearing image string stream..." << endl;
+        ImageStringStream.str("");
         IsDataReady = 1;
-		//free the socket data
         free(sockdata);
+
 		//printf("After thread lock: IplJpegImageStream=%d\n", &IplJpegImageStream);	
 		//cvReleaseImage(&IplJpegImageStream);
 		//RawRGBFrame.release();
