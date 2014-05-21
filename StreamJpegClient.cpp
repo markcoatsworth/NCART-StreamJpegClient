@@ -16,7 +16,7 @@
 
 //OpenCV2.2 includes
 #include <opencv2/opencv.hpp>
-//#include <opencv/highgui.h>
+#include <opencv/highgui.h>
 
 //Jpeg Lib includes
 #include <jpeglib.h>
@@ -39,7 +39,8 @@ using namespace std;
 // Any changes made here should be reflected in globals.h
 
 char* ServerIP;
-cv::Mat RawRGBFrame; 
+cv::Mat DepthFrame;
+cv::Mat RawRGBDFrame; 
 int IsDataReady = 0;
 int sock;
 int ServerPort;
@@ -72,9 +73,6 @@ int main(int argc, char **argv)
 	sigaction(SIGINT, &SignalActionManager, NULL);
 	sigaction(SIGPIPE, &SignalActionManager, NULL);
 
-    // build a blob object from some data
-    //lo_blob btest = lo_blob_new(sizeof(testdata), testdata);
-
 	// Verify command line arguments
     if (argc != 3) 
 	{
@@ -85,6 +83,10 @@ int main(int argc, char **argv)
     ServerIP = argv[1];
     ServerPort = atoi(argv[2]);
     
+	// Initialize the DepthFrame matrix to 640x480. Note that we do not need to initialize the RawRGBDFrame matrix.
+	//cv::Mat DepthFrame(640, 480, CV_8UC3);
+	//cout << "DepthFrame.rows=" << DepthFrame.rows << ", DepthFrame.cols=" << DepthFrame.cols << endl;
+
     // Run the streaming client as a separate thread
     if (pthread_create(&thread_c, NULL, streamClient, NULL)) 
 	{
@@ -95,7 +97,9 @@ int main(int argc, char **argv)
     cv::namedWindow("stream_client");//, CV_WINDOW_AUTOSIZE);
 
 	// Debug: set up the depth data output file
-	std::ofstream DepthFile;
+	//std::ofstream DepthFile;
+
+	
 
 	// Begin the main client loop which checks for available data, then displays it as a video stream
     while(1) 
@@ -108,26 +112,23 @@ int main(int argc, char **argv)
             // Display image, clear data
 			try
 			{
-				imshow("stream_client", RawRGBFrame);
+				//cout << "DepthFrame.rows=" << DepthFrame.rows << ", DepthFrame.cols=" << DepthFrame.cols << ", DepthFrame.channels=" << DepthFrame.channels() << ", DepthFrame.type=" << DepthFrame.type() << endl;
+				//cout << "RawRGBDFrame.rows=" << RawRGBDFrame.rows << ", RawRGBDFrame.cols=" << RawRGBDFrame.cols << ", RawRGBDFrame.channels=" << RawRGBDFrame.channels() << ", RawRGBDFrame.type=" << RawRGBDFrame.type() << endl;
+				//imshow("stream_client", RawRGBDFrame);
+				cv::hconcat(RawRGBDFrame, DepthFrame, RawRGBDFrame);				
+				imshow("stream_client", RawRGBDFrame);
 			}
 			catch(cv::Exception E)
 			{
 				printf("Invalid JPEG file, skipping.");
 			}
-            RawRGBFrame.release();
-			cvReleaseImage(&IplJpegImageStream);
-
-			// Display depth
-			//cout << "Writing " << DepthStringStream.tellg() << " bytes of depth data to file." << endl;
-			DepthFile.open("depth.data", std::ofstream::out | std::ofstream::app);			
-			DepthFile << DepthStringStream.rdbuf();
-			DepthFile << endl << endl << endl << "testline" << endl << endl << endl;
-			DepthFile.close();
-
-			// Clear depth string stream			
-			//cout << "Clearing DepthStringStream..." << endl;
-	        DepthStringStream.str("");
-        
+            
+			// Clear image + depth string stream
+			RawRGBDFrame.release();
+			DepthFrame.release();			
+			ImageStringStream.str("");			
+			DepthStringStream.str("");
+        	cvReleaseImage(&IplJpegImageStream);
 
 			// Now wait for the next data
 			IsDataReady = 0;
@@ -213,6 +214,10 @@ void* streamClient(void* arg)
     char *sockdata;
     char lengthBuff[4];
     int i, j, k, bytes;
+	std::ofstream DepthFile;
+
+	// Initialize the DepthFrame matrix to 640x480. Note that we do not need to initialize the RawRGBDFrame matrix.
+	//cv::Mat DepthFrame(480, 640, CV_8UC3);
 
     // Start receiving images + depth data
     while(1) 
@@ -239,16 +244,19 @@ void* streamClient(void* arg)
         // Write the raw jpeg data to the stringstream.
 		ImageStringStream.write(sockdata, ImageFileLength);
 			
-        // Uncompress jpeg data to an IplImage, then to a Mat
+        // Uncompress jpeg data to an IplImage, then write it to the RGBD matrix
 		IplJpegImageStream = readJpeg(ImageStringStream);
-		RawRGBFrame = cv::Mat(IplJpegImageStream);
+		RawRGBDFrame = cv::Mat(IplJpegImageStream);
+
+		// Clear the socket data before moving on to depth frame
+		free(sockdata);
 
 		// Now we have to bring in depth data. Read number of bytes of depth data
 		bytes = recv(sock, DepthFileLengthString, 10, 0);
-        DepthFileLength =  atoi(DepthFileLengthString);		       
+        DepthFileLength = atoi(DepthFileLengthString);		       
 		sockdata = ( char *) malloc(DepthFileLength);
 
-		cout << "DepthFileLength=" << DepthFileLength << endl;
+		cout << "DepthFileLength=" << DepthFileLength << ", sizeof(sockdata)=" << sizeof(*sockdata) << endl;
 
         // Read depth data from the socket
         for (i = 0; i < DepthFileLength; i += bytes) 
@@ -259,23 +267,113 @@ void* streamClient(void* arg)
                 printf("Depth data receive failed. %d\n", i);
                 quit("Depth data receive failed.", 1);
             }
+			else
+			{
+				//cout << "Received " << bytes << " bytes of depth data from socket." << endl;
+			}
         }
 
- 		// Write the raw depth data to the stringstream.
+		//cout << "Finished receiving depth data." << endl;
+
+ 		// Write the raw depth data to the stringstream.		
 		DepthStringStream.write(sockdata, DepthFileLength);
-		//cout << "Captured " << DepthStringStream.tellg() << " bytes of depth data." << endl;
+		cout << "Captured " << DepthStringStream.str().size() << " bytes of depth data." << endl;
+		
+		// Now add the depth data to the DepthFrame matrix	
+		DepthFrame = cv::Mat(480, 640, CV_8UC3);
+		char MajorDepthValue;
+		char MinorDepthValue;
+
+		// Write depth data to file (debugging!)
+		/*
+		DepthFile.open("depth.data", std::ofstream::out | std::ofstream::app);
+		DepthFile << DepthStringStream.rdbuf();
+		DepthFile << endl << "newframe" << endl;	
+		DepthFile.close();
+		*/
+		
+
+
+		for(int i = 0; i < 640*480; i++)
+		{
+		
+			//cout << "Adding depth data, row=" << row << ", col=" << col << endl;
+			MajorDepthValue = sockdata[(i*2)];
+			MajorDepthValue = sockdata[(i*2)+1];
+			//DepthStringStream >> MajorDepthValue >> MinorDepthValue;
+			unsigned short DepthValue = ((unsigned short)MajorDepthValue * 256) + (unsigned short)MinorDepthValue;
+			
+			unsigned short lb = DepthValue/10 % 256;
+		    unsigned short ub = DepthValue/10 / 256;
+			
+			
+		    switch (ub) 
+			{
+		        case 0:
+		            DepthFrame.datastart[3*i+2] = 255;
+		            DepthFrame.datastart[3*i+1] = 255-lb;
+		            DepthFrame.datastart[3*i+0] = 255-lb;
+		        break;
+		        case 1:
+		            DepthFrame.datastart[3*i+2] = 255;
+		            DepthFrame.datastart[3*i+1] = lb;
+		            DepthFrame.datastart[3*i+0] = 0;
+		        break;
+		        case 2:
+		            DepthFrame.datastart[3*i+2] = 255-lb;
+		            DepthFrame.datastart[3*i+1] = 255;
+		            DepthFrame.datastart[3*i+0] = 0;
+		        break;
+		        case 3:
+		            DepthFrame.datastart[3*i+2] = 0;
+		            DepthFrame.datastart[3*i+1] = 255;
+		            DepthFrame.datastart[3*i+0] = lb;
+		        break;
+		        case 4:
+		            DepthFrame.datastart[3*i+2] = 0;
+		            DepthFrame.datastart[3*i+1] = 255-lb;
+		            DepthFrame.datastart[3*i+0] = 255;
+		        break;
+		        case 5:
+		            DepthFrame.datastart[3*i+2] = 0;
+		            DepthFrame.datastart[3*i+1] = 0;
+		            DepthFrame.datastart[3*i+0] = 255-lb;
+		        break;
+		        default:
+		            DepthFrame.datastart[3*i+2] = 0;
+		            DepthFrame.datastart[3*i+1] = 0;
+		            DepthFrame.datastart[3*i+0] = 0;
+		        break;
+		    } 
+		
+		}
+
+		/*		
+		for(int row = 0; row < 480; row++)
+		{
+			for(int col = 0; col < 640; col ++)
+			{
+				//cout << "Adding depth data, row=" << row << ", col=" << col << endl;
+				
+				DepthStringStream >> MajorDepthValue >> MinorDepthValue;
+				unsigned short DepthValue = ((unsigned short)MajorDepthValue * 256) + (unsigned short)MinorDepthValue;
+				cout << "MajorDepthValue=" << MajorDepthValue << ", MinorDepthValue=" << MinorDepthValue << ", DepthValue=" << DepthValue << endl;
+				
+				DepthFrame.at<cv::Vec3b>(row, col)[0] = 60;
+				DepthFrame.at<cv::Vec3b>(row, col)[1] = 0;
+				DepthFrame.at<cv::Vec3b>(row, col)[2] = 0;
+			
+			}
+		}
+		*/
 
         pthread_mutex_lock(&mutex);
 
         // Clear the stringstream and free socket data
 		//cout << "Clearing image string stream..." << endl;
-        ImageStringStream.str("");
+        //ImageStringStream.str("");
         IsDataReady = 1;
         free(sockdata);
-
-		//printf("After thread lock: IplJpegImageStream=%d\n", &IplJpegImageStream);	
-		//cvReleaseImage(&IplJpegImageStream);
-		//RawRGBFrame.release();
         
 		//the frame came in well, unlock the thread and proceed to get the next frame.
         pthread_mutex_unlock(&mutex);
