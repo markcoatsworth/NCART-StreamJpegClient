@@ -83,10 +83,6 @@ int main(int argc, char **argv)
     ServerIP = argv[1];
     ServerPort = atoi(argv[2]);
     
-	// Initialize the DepthFrame matrix to 640x480. Note that we do not need to initialize the RawRGBDFrame matrix.
-	//cv::Mat DepthFrame(640, 480, CV_8UC3);
-	//cout << "DepthFrame.rows=" << DepthFrame.rows << ", DepthFrame.cols=" << DepthFrame.cols << endl;
-
     // Run the streaming client as a separate thread
     if (pthread_create(&thread_c, NULL, streamClient, NULL)) 
 	{
@@ -96,11 +92,6 @@ int main(int argc, char **argv)
 	// Setup the video display window
     cv::namedWindow("stream_client");//, CV_WINDOW_AUTOSIZE);
 
-	// Debug: set up the depth data output file
-	//std::ofstream DepthFile;
-
-	
-
 	// Begin the main client loop which checks for available data, then displays it as a video stream
     while(1) 
 	{
@@ -109,12 +100,9 @@ int main(int argc, char **argv)
 
         if (IsDataReady) 
 		{
-            // Display image, clear data
+            // Merge image + depth data into single frame, display in viewer window
 			try
 			{
-				//cout << "DepthFrame.rows=" << DepthFrame.rows << ", DepthFrame.cols=" << DepthFrame.cols << ", DepthFrame.channels=" << DepthFrame.channels() << ", DepthFrame.type=" << DepthFrame.type() << endl;
-				//cout << "RawRGBDFrame.rows=" << RawRGBDFrame.rows << ", RawRGBDFrame.cols=" << RawRGBDFrame.cols << ", RawRGBDFrame.channels=" << RawRGBDFrame.channels() << ", RawRGBDFrame.type=" << RawRGBDFrame.type() << endl;
-				//imshow("stream_client", RawRGBDFrame);
 				cv::hconcat(RawRGBDFrame, DepthFrame, RawRGBDFrame);				
 				imshow("stream_client", RawRGBDFrame);
 			}
@@ -267,17 +255,7 @@ void* streamClient(void* arg)
                 printf("Depth data receive failed. %d\n", i);
                 quit("Depth data receive failed.", 1);
             }
-			else
-			{
-				//cout << "Received " << bytes << " bytes of depth data from socket." << endl;
-			}
         }
-
-		//cout << "Finished receiving depth data." << endl;
-
- 		// Write the raw depth data to the stringstream.		
-		DepthStringStream.write(sockdata, DepthFileLength);
-		cout << "Captured " << DepthStringStream.str().size() << " bytes of depth data." << endl;
 		
 		// Now add the depth data to the DepthFrame matrix	
 		DepthFrame = cv::Mat(480, 640, CV_8UC3);
@@ -292,17 +270,13 @@ void* streamClient(void* arg)
 		DepthFile.close();
 		*/
 		
-
-
+		// Build DepthFrame directly from the sockdata array to save cycles
 		for(int i = 0; i < 640*480; i++)
 		{
-		
-			//cout << "Adding depth data, row=" << row << ", col=" << col << endl;
-			MajorDepthValue = sockdata[(i*2)];
 			MajorDepthValue = sockdata[(i*2)+1];
-			//DepthStringStream >> MajorDepthValue >> MinorDepthValue;
-			unsigned short DepthValue = ((unsigned short)MajorDepthValue * 256) + (unsigned short)MinorDepthValue;
-			
+			MajorDepthValue = sockdata[(i*2)];
+
+			unsigned short DepthValue = ((unsigned short)MajorDepthValue * 256) + (unsigned short)MinorDepthValue;			
 			unsigned short lb = DepthValue/10 % 256;
 		    unsigned short ub = DepthValue/10 / 256;
 			
@@ -369,16 +343,14 @@ void* streamClient(void* arg)
 
         pthread_mutex_lock(&mutex);
 
-        // Clear the stringstream and free socket data
-		//cout << "Clearing image string stream..." << endl;
-        //ImageStringStream.str("");
+		// Reset IsDataReady, clear socket data 
         IsDataReady = 1;
         free(sockdata);
         
-		//the frame came in well, unlock the thread and proceed to get the next frame.
+		// The frame came in well, unlock the thread and proceed to get the next frame.
         pthread_mutex_unlock(&mutex);
 
-        // have we terminated yet?
+        // Have we terminated yet?
         pthread_testcancel();
         bytes = 0;
 
