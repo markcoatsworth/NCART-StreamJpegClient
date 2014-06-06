@@ -18,6 +18,9 @@
 #include <opencv2/opencv.hpp>
 #include <opencv/highgui.h>
 
+//zLib includes
+#include <zlib.h>
+
 //Jpeg Lib includes
 #include <jpeglib.h>
 
@@ -269,12 +272,27 @@ void* streamClient(void* arg)
 		DepthFile << endl << "newframe" << endl;	
 		DepthFile.close();
 		*/
+
+		// Decompress the depth data from sockdata
+		ulong SizeDataUncompressed = 640*480*2;
+		unsigned char* DataUncompressed = (unsigned char*)malloc(SizeDataUncompressed);
+		
+		int z_result = uncompress(DataUncompressed, &SizeDataUncompressed, (unsigned char*)sockdata, DepthFileLength);
+		switch(z_result)
+		{
+			case Z_OK:
+				printf("Decompression successful!\n");
+				break;
+			case Z_BUF_ERROR:
+				printf("Output buffer wasn't large enough!\n");
+				break;
+		}
 		
 		// Build DepthFrame directly from the sockdata array to save cycles
 		for(int i = 0; i < 640*480; i++)
 		{
-			MajorDepthValue = sockdata[(i*2)+1];
-			MajorDepthValue = sockdata[(i*2)];
+			MajorDepthValue = DataUncompressed[(i*2)+1];
+			MinorDepthValue = DataUncompressed[(i*2)];
 
 			unsigned short DepthValue = ((unsigned short)MajorDepthValue * 256) + (unsigned short)MinorDepthValue;			
 			unsigned short lb = DepthValue/10 % 256;
