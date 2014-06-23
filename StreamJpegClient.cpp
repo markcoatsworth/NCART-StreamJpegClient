@@ -1,39 +1,41 @@
-#include <stdio.h>
-#include <iostream>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <stdlib.h>
+#include <stdio.h>
 #include <sstream>
 #include <signal.h>
+#include <time.h>
 
-//Socket includes
+// Socket includes
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
-//PThread include
+// PThread include
 #include <pthread.h>
 
-//OpenCV2.2 includes
+// OpenCV2.2 includes
 #include <opencv2/opencv.hpp>
 #include <opencv/highgui.h>
 
-//zLib includes
+// zLib includes
 #include <zlib.h>
+#include <bzlib.h>
+#include <snappy.h>
 
-//Jpeg Lib includes
+// Jpeg Lib includes
 #include <jpeglib.h>
 
-//Liblo includes
-//#include <lo/lo.h>
-
-//Local includes
+// Local includes
 #include "process_jpeg.h"
 #include "globals.h"
 #include "osc_handlers.h"
 
-
-#define OUTPUT_BUF_SIZE 4096 /* choose an efficiently fwrite’able size */
+// Global constants
+#define DISPLAY_RGB_STREAM 1
+#define DISPLAY_DEPTH_STREAM 1
+#define FILE_OUTPUT 1
 
 using namespace std;
 
@@ -42,34 +44,51 @@ using namespace std;
 // Any changes made here should be reflected in globals.h
 
 char* ServerIP;
+char DepthCompressionLibrary[10] = "snappy"; // can be "zlib", "snappy", or "none"
+char DepthFileLengthString[10];
+char ImageFileLengthString[10];
+char StreamDataFileName[40];
+
 cv::Mat DepthFrame;
-cv::Mat RawRGBDFrame; 
+cv::Mat RawRGBDFrame;
+
+int DepthFileLength;
+int ImageFileLength;
 int IsDataReady = 0;
+int NumFramesCaptured = 0;
 int sock;
 int ServerPort;
+
 IplImage *IplJpegImageStream;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 struct sigaction SignalActionManager;
 
+std::ofstream StreamDataFile;
 std::stringstream DepthStringStream;
 std::stringstream ImageStringStream;
 
-char DepthFileLengthString[10];
-char ImageFileLengthString[10];
-int DepthFileLength;
-int ImageFileLength;
+time_t StartTime;
+time_t CurrentTime;
+double RunningTime;
+float CurrentFPS;
+
+
+// Function declarations
 
 void SignalHandler(int sigNum);
 void* streamClient(void* arg);
+cv::Mat BuildRGBDepthFrame(char* _depthData, int _depthFileLength);
 void quit(char* msg, int retval);
 
-//char testdata[6] = "ABCDE";
+
+// Main program
 
 int main(int argc, char **argv) 
 {
     pthread_t thread_c;
     char key = '0';
     int i = 0;
+	
 
 	// Set up signal handler
 	SignalActionManager.sa_handler = SignalHandler;
@@ -91,6 +110,13 @@ int main(int argc, char **argv)
 	{
         quit("pthread_create failed.", 1);
     }
+
+	// Determine name of stream data capture file
+	struct tm* CurrentDateTime;
+	time_t RawTime;
+	time(&RawTime);
+	CurrentDateTime = localtime(&RawTime);
+	strftime(StreamDataFileName, 40, "stream_data_%Y-%m-%d_%H%M%S.csv", CurrentDateTime);
 	
 	// Setup the video display window
     cv::namedWindow("stream_client");//, CV_WINDOW_AUTOSIZE);
@@ -103,10 +129,33 @@ int main(int argc, char **argv)
 
         if (IsDataReady) 
 		{
+			// Record the current time, increment the capture count and determine current framerate
+			NumFramesCaptured++;
+			time(&CurrentTime);
+			RunningTime = difftime(CurrentTime, StartTime);
+			CurrentFPS = (float)NumFramesCaptured / (float)RunningTime;
+			//cout << "NumFramesCaptured=" << NumFramesCaptured << ", Time = " << RunningTime << ", FPS=" << CurrentFPS << endl;
+
+			// Output the frame rate to file
+			if(FILE_OUTPUT == 1)
+			{
+				StreamDataFile.open(StreamDataFileName, std::ofstream::out | std::ofstream::app);
+				StreamDataFile << DepthCompressionLibrary << "," << NumFramesCaptured << "," << RunningTime << endl;
+				StreamDataFile.close();
+			}
+
+			// Put the FPS value onto the image frame
+			stringstream FPSString (stringstream::in | stringstream::out);
+			FPSString << fixed << setprecision(2) << CurrentFPS << " fps";
+			cv::putText(RawRGBDFrame, FPSString.str(), cvPoint(15, 50), CV_FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(200, 200, 200), 2);
+
             // Merge image + depth data into single frame, display in viewer window
 			try
 			{
-				cv::hconcat(RawRGBDFrame, DepthFrame, RawRGBDFrame);				
+				if(DISPLAY_DEPTH_STREAM == 1)
+				{
+					cv::hconcat(RawRGBDFrame, DepthFrame, RawRGBDFrame);				
+				}				
 				imshow("stream_client", RawRGBDFrame);
 			}
 			catch(cv::Exception E)
@@ -173,6 +222,7 @@ void SignalHandler(int sigNum)
 void* streamClient(void* arg) 
 {
     struct sockaddr_in server;
+	
 
     //make this thread cancellable using pthread_cancel()
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
@@ -210,7 +260,11 @@ void* streamClient(void* arg)
 	// Initialize the DepthFrame matrix to 640x480. Note that we do not need to initialize the RawRGBDFrame matrix.
 	//cv::Mat DepthFrame(480, 640, CV_8UC3);
 
+	// Record the start time
+	time(&StartTime);
+
     // Start receiving images + depth data
+	cout << "Starting to receive images + depth data" << endl;
     while(1) 
 	{
 
@@ -219,7 +273,7 @@ void* streamClient(void* arg)
         ImageFileLength =  atoi(ImageFileLengthString);
         sockdata = ( char *) malloc(ImageFileLength);
 
-		cout << "ImageFileLength=" << ImageFileLength << endl;
+		//cout << "ImageFileLength=" << ImageFileLength << endl;
 
         // Read image data from the socket
         for (i = 0; i < ImageFileLength; i += bytes) 
@@ -247,7 +301,7 @@ void* streamClient(void* arg)
         DepthFileLength = atoi(DepthFileLengthString);		       
 		sockdata = ( char *) malloc(DepthFileLength);
 
-		cout << "DepthFileLength=" << DepthFileLength << ", sizeof(sockdata)=" << sizeof(*sockdata) << endl;
+		//cout << "DepthFileLength=" << DepthFileLength << ", sizeof(sockdata)=" << sizeof(*sockdata) << endl;
 
         // Read depth data from the socket
         for (i = 0; i < DepthFileLength; i += bytes) 
@@ -262,102 +316,10 @@ void* streamClient(void* arg)
 		
 		// Now add the depth data to the DepthFrame matrix	
 		DepthFrame = cv::Mat(480, 640, CV_8UC3);
-		char MajorDepthValue;
-		char MinorDepthValue;
-
-		// Write depth data to file (debugging!)
-		/*
-		DepthFile.open("depth.data", std::ofstream::out | std::ofstream::app);
-		DepthFile << DepthStringStream.rdbuf();
-		DepthFile << endl << "newframe" << endl;	
-		DepthFile.close();
-		*/
-
-		// Decompress the depth data from sockdata
-		ulong SizeDataUncompressed = 640*480*2;
-		unsigned char* DataUncompressed = (unsigned char*)malloc(SizeDataUncompressed);
-		
-		int z_result = uncompress(DataUncompressed, &SizeDataUncompressed, (unsigned char*)sockdata, DepthFileLength);
-		switch(z_result)
+		if(DISPLAY_DEPTH_STREAM == 1)
 		{
-			case Z_OK:
-				printf("Decompression successful!\n");
-				break;
-			case Z_BUF_ERROR:
-				printf("Output buffer wasn't large enough!\n");
-				break;
+			DepthFrame = BuildRGBDepthFrame(sockdata, DepthFileLength);		
 		}
-		
-		// Build DepthFrame directly from the sockdata array to save cycles
-		for(int i = 0; i < 640*480; i++)
-		{
-			MajorDepthValue = DataUncompressed[(i*2)+1];
-			MinorDepthValue = DataUncompressed[(i*2)];
-
-			unsigned short DepthValue = ((unsigned short)MajorDepthValue * 256) + (unsigned short)MinorDepthValue;			
-			unsigned short lb = DepthValue/10 % 256;
-		    unsigned short ub = DepthValue/10 / 256;
-			
-			
-		    switch (ub) 
-			{
-		        case 0:
-		            DepthFrame.datastart[3*i+2] = 255;
-		            DepthFrame.datastart[3*i+1] = 255-lb;
-		            DepthFrame.datastart[3*i+0] = 255-lb;
-		        break;
-		        case 1:
-		            DepthFrame.datastart[3*i+2] = 255;
-		            DepthFrame.datastart[3*i+1] = lb;
-		            DepthFrame.datastart[3*i+0] = 0;
-		        break;
-		        case 2:
-		            DepthFrame.datastart[3*i+2] = 255-lb;
-		            DepthFrame.datastart[3*i+1] = 255;
-		            DepthFrame.datastart[3*i+0] = 0;
-		        break;
-		        case 3:
-		            DepthFrame.datastart[3*i+2] = 0;
-		            DepthFrame.datastart[3*i+1] = 255;
-		            DepthFrame.datastart[3*i+0] = lb;
-		        break;
-		        case 4:
-		            DepthFrame.datastart[3*i+2] = 0;
-		            DepthFrame.datastart[3*i+1] = 255-lb;
-		            DepthFrame.datastart[3*i+0] = 255;
-		        break;
-		        case 5:
-		            DepthFrame.datastart[3*i+2] = 0;
-		            DepthFrame.datastart[3*i+1] = 0;
-		            DepthFrame.datastart[3*i+0] = 255-lb;
-		        break;
-		        default:
-		            DepthFrame.datastart[3*i+2] = 0;
-		            DepthFrame.datastart[3*i+1] = 0;
-		            DepthFrame.datastart[3*i+0] = 0;
-		        break;
-		    } 
-		
-		}
-
-		/*		
-		for(int row = 0; row < 480; row++)
-		{
-			for(int col = 0; col < 640; col ++)
-			{
-				//cout << "Adding depth data, row=" << row << ", col=" << col << endl;
-				
-				DepthStringStream >> MajorDepthValue >> MinorDepthValue;
-				unsigned short DepthValue = ((unsigned short)MajorDepthValue * 256) + (unsigned short)MinorDepthValue;
-				cout << "MajorDepthValue=" << MajorDepthValue << ", MinorDepthValue=" << MinorDepthValue << ", DepthValue=" << DepthValue << endl;
-				
-				DepthFrame.at<cv::Vec3b>(row, col)[0] = 60;
-				DepthFrame.at<cv::Vec3b>(row, col)[1] = 0;
-				DepthFrame.at<cv::Vec3b>(row, col)[2] = 0;
-			
-			}
-		}
-		*/
 
         pthread_mutex_lock(&mutex);
 
@@ -375,6 +337,164 @@ void* streamClient(void* arg)
         // no, take a rest for a while
         usleep(1000);
     }
+}
+
+/**
+ * Reads depth data from a character pointer, decompresses it if necessary, then returns a cv::Mat object with an RGB visualization
+**/
+
+cv::Mat BuildRGBDepthFrame(char* _depthData, int _depthFileLength)
+{
+	// Decompression variables
+	
+	unsigned char* DataUncompressed;
+
+	// Decompress the depth data from sockdata
+	if(strcmp(DepthCompressionLibrary, "zlib") == 0)
+	{
+		ulong SizeDataUncompressed = 640*480*2;
+		DataUncompressed = (unsigned char*)malloc(SizeDataUncompressed);
+		
+		int z_result = uncompress(DataUncompressed, &SizeDataUncompressed, (unsigned char*)_depthData, _depthFileLength);
+
+		switch(z_result)
+		{
+			case Z_OK:
+				printf("Decompression successful! depthFileLength=%d\n", _depthFileLength);
+				break;
+			case Z_BUF_ERROR:
+				printf("Decompression error: output buffer wasn't large enough!\n");
+				break;
+		}
+	}
+	else if(strcmp(DepthCompressionLibrary, "bzip2") == 0)
+	{
+		uint SizeDataUncompressed = 640*480*2;
+		DataUncompressed = (unsigned char*)malloc(SizeDataUncompressed);
+
+		int bz_result = BZ2_bzBuffToBuffDecompress((char*)DataUncompressed, &SizeDataUncompressed, _depthData, _depthFileLength, 0, 0);
+
+		switch(bz_result)
+		{
+			case BZ_OK:
+				printf("Decompression successful! depthFileLength=%d\n", _depthFileLength);
+				break;
+		
+		}
+	}
+	else if(strcmp(DepthCompressionLibrary, "snappy") == 0)
+	{
+		ulong SizeDataUncompressed = 640*480*2;
+		std::string DataCompressed(_depthData, _depthFileLength);
+		std::string DataUncompressedStdString;
+
+		DataUncompressed = (unsigned char*)malloc(SizeDataUncompressed);
+		DataUncompressedStdString.resize(SizeDataUncompressed);
+		try 
+		{
+			snappy::Uncompress(DataCompressed.data(), _depthFileLength, &DataUncompressedStdString);
+		}
+		catch(cv::Exception E)
+		{
+			cout << "Depth data error, could not uncompress." << endl;
+		}
+
+		for(int i = 0; i < 614400; i ++)
+		{
+			DataUncompressed[i] = DataUncompressedStdString.at(i);
+		}		
+		//cout << "String length=" << DataUncompressedStdString.length() << ", size=" << DataUncompressedStdString.size() << endl;
+		//unsigned char* TempString = new unsigned char[ 640*480*2 ];
+		//strcpy( DataUncompressed, DataUncompressedStdString.c_str() );
+		//DataUncompressed = (unsigned char*)DataUncompressedStdString.c_str();
+		cout << "strlen(DataUncompressed)=" << strlen((char*)DataUncompressed) << endl;
+		
+		//printf("DataUncompressed=%s\n", DataUncompressed);
+	}
+	else if(strcmp(DepthCompressionLibrary, "none") == 0)
+	{
+		// If no compression used, simply point DataUncompressed to _depthData to save time
+		DataUncompressed = (unsigned char*)_depthData;
+	}
+
+	// Declare variables used to build depth RGB image
+	char MajorDepthValue;
+	char MinorDepthValue;
+	cv::Mat DepthFrame(480, 640, CV_8UC3);
+
+	// Build DepthFrame from the uncompressed data
+	for(int i = 0; i < 640*480; i++)
+	{	
+		//cout << "i=" << i;
+		MajorDepthValue = DataUncompressed[(i*2)+1];
+		MinorDepthValue = DataUncompressed[(i*2)];
+		
+		unsigned short DepthValue = ((unsigned short)MajorDepthValue * 256) + (unsigned short)MinorDepthValue;			
+		unsigned short lb = DepthValue/5 % 256;
+	    unsigned short ub = DepthValue/5 / 256;
+		//cout << ", DepthValue=" << DepthValue << endl;
+		
+	    switch (ub) 
+		{
+	        case 0:
+	            DepthFrame.datastart[3*i+2] = 255;
+	            DepthFrame.datastart[3*i+1] = 255-lb;
+	            DepthFrame.datastart[3*i+0] = 255-lb;
+	        break;
+	        case 1:
+	            DepthFrame.datastart[3*i+2] = 255;
+	            DepthFrame.datastart[3*i+1] = lb;
+	            DepthFrame.datastart[3*i+0] = 0;
+	        break;
+	        case 2:
+	            DepthFrame.datastart[3*i+2] = 255-lb;
+	            DepthFrame.datastart[3*i+1] = 255;
+	            DepthFrame.datastart[3*i+0] = 0;
+	        break;
+	        case 3:
+	            DepthFrame.datastart[3*i+2] = 0;
+	            DepthFrame.datastart[3*i+1] = 255;
+	            DepthFrame.datastart[3*i+0] = lb;
+	        break;
+	        case 4:
+	            DepthFrame.datastart[3*i+2] = 0;
+	            DepthFrame.datastart[3*i+1] = 255-lb;
+	            DepthFrame.datastart[3*i+0] = 255;
+	        break;
+	        case 5:
+	            DepthFrame.datastart[3*i+2] = 0;
+	            DepthFrame.datastart[3*i+1] = 0;
+	            DepthFrame.datastart[3*i+0] = 255-lb;
+	        break;
+	        default:
+	            DepthFrame.datastart[3*i+2] = 0;
+	            DepthFrame.datastart[3*i+1] = 0;
+	            DepthFrame.datastart[3*i+0] = 0;
+	        break;
+	    } 
+	
+	}
+
+	return DepthFrame;
+
+	/*		
+	for(int row = 0; row < 480; row++)
+	{
+		for(int col = 0; col < 640; col ++)
+		{
+			//cout << "Adding depth data, row=" << row << ", col=" << col << endl;
+			
+			DepthStringStream >> MajorDepthValue >> MinorDepthValue;
+			unsigned short DepthValue = ((unsigned short)MajorDepthValue * 256) + (unsigned short)MinorDepthValue;
+			cout << "MajorDepthValue=" << MajorDepthValue << ", MinorDepthValue=" << MinorDepthValue << ", DepthValue=" << DepthValue << endl;
+			
+			DepthFrame.at<cv::Vec3b>(row, col)[0] = 60;
+			DepthFrame.at<cv::Vec3b>(row, col)[1] = 0;
+			DepthFrame.at<cv::Vec3b>(row, col)[2] = 0;
+		
+		}
+	}
+	*/
 }
 
 /**

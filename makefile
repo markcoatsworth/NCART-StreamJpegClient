@@ -2,10 +2,10 @@ all: StreamJpegClient
 	./StreamJpegClient
 
 StreamJpegClient: StreamJpegClient.o process_jpeg.o globals.o osc_handlers.o
-	g++ -o StreamJpegClient StreamJpegClient.o process_jpeg.o globals.o osc_handlers.o `pkg-config opencv --cflags --libs` -lpthread -llo -w
+	g++ -o StreamJpegClient StreamJpegClient.o process_jpeg.o globals.o osc_handlers.o `pkg-config opencv --cflags --libs` -lpthread -llo -lbz2 -lsnappy -w
 
 StreamJpegClient.o: StreamJpegClient.cpp
-	g++ -Wall -c -o StreamJpegClient.o StreamJpegClient.cpp `pkg-config opencv --cflags --libs` -lpthread -w
+	g++ -Wall -c -o StreamJpegClient.o StreamJpegClient.cpp `pkg-config opencv --cflags --libs` -lpthread -lbz2 -lsnappy -w
 
 process_jpeg.o: process_jpeg.cpp
 	g++ -Wall -c -o process_jpeg.o process_jpeg.cpp `pkg-config opencv --cflags --libs` -lpthread -w
